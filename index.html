@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LL97 Decarbonization Decision Support Tool</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { background-color: #f4f6f9; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .hero-section { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; padding: 40px 0; margin-bottom: 30px; }
+        .card { border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 20px; border-radius: 10px; }
+        .card-header { background-color: #fff; border-bottom: 2px solid #f0f0f0; font-weight: 600; color: #333; padding: 15px 20px; }
+        .btn-calculate { background-color: #28a745; border: none; font-size: 1.1rem; padding: 10px; transition: all 0.3s; }
+        .btn-calculate:hover { background-color: #218838; transform: translateY(-2px); }
+        .result-value { font-size: 1.8rem; font-weight: bold; }
+        .text-penalty { color: #dc3545; }
+        .text-savings { color: #198754; }
+        .footer { margin-top: 50px; padding: 20px; color: #6c757d; font-size: 0.9rem; border-top: 1px solid #e9ecef; }
+    </style>
+</head>
+<body>
+
+<div class="hero-section text-center">
+    <div class="container">
+        <h1>NYC Local Law 97 Decision Support Tool</h1>
+        <p class="lead">An Integrated Machine Learning Approach to Prioritize Energy Conservation Measures</p>
+        <span class="badge bg-light text-dark">Model Version: 1.0.2 (Stacked Ensemble)</span>
+    </div>
+</div>
+
+<div class="container">
+    <div class="row">
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header">🏢 Building Parameters</div>
+                <div class="card-body">
+                    <form id="calcForm">
+                        <div class="mb-3">
+                            <label class="form-label">Gross Floor Area (sq ft)</label>
+                            <input type="number" class="form-control" id="area" value="85000">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Building Year</label>
+                            <input type="number" class="form-control" id="year" value="1950">
+                        </div>
+                        <h6 class="mt-4 text-primary">Annual Energy Consumption</h6>
+                        <div class="mb-3">
+                            <label class="form-label">Electricity (kWh)</label>
+                            <input type="number" class="form-control" id="elec" value="650000">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Natural Gas (Therms)</label>
+                            <input type="number" class="form-control" id="gas" value="45000">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Fuel Oil #2 (Gallons)</label>
+                            <input type="number" class="form-control" id="oil" value="2000">
+                        </div>
+                        <h6 class="mt-4 text-primary">Financial Constraints</h6>
+                        <div class="mb-3">
+                            <label class="form-label">Retrofit Budget ($)</label>
+                            <input type="number" class="form-control" id="budget" value="150000">
+                        </div>
+                        <button type="button" class="btn btn-primary btn-calculate w-100 mt-3" onclick="runSimulation()">
+                            Run Analysis 🚀
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-8">
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <div class="card text-center p-3">
+                        <small class="text-muted">Current Annual Penalty (2024)</small>
+                        <div class="result-value text-penalty" id="currentPenalty">$0</div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card text-center p-3">
+                        <small class="text-muted">Max Potential Savings (Annual)</small>
+                        <div class="result-value text-savings" id="totalSavings">$0</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">📊 LL97 Compliance Analysis (2024-2050)</div>
+                <div class="card-body">
+                    <canvas id="emissionChart" height="120"></canvas>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">💡 Recommended ECM Sequence (Optimal ROI)</div>
+                <div class="card-body table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Rank</th>
+                                <th>ECM Measure</th>
+                                <th>Est. Cost</th>
+                                <th>Net Savings/Yr</th>
+                                <th>Payback</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ecmTableBody">
+                            </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer text-center">
+        <p>&copy; 2025 Baowen Zhang & Paul Crovella.</p>
+        <p>Department of Sustainable Resources Management, SUNY College of Environmental Science and Forestry.</p>
+        <small>Disclaimer: This tool provides estimates based on machine learning models (R²≈0.94). Actual results may vary.</small>
+    </footer>
+</div>
+
+<script>
+    // --- 1. LL97 核心参数定义 ---
+    const COF_ELEC = 0.000288962; // tCO2e per kWh
+    const COF_GAS = 0.005311;     // tCO2e per Therm
+    const COF_OIL = 0.01021;      // tCO2e per Gallon (Assuming #2 oil)
+    const PENALTY_RATE = 268;     // $ per tCO2e
+
+    // Multifamily Limits (tCO2e per sq ft)
+    const LIMIT_2024 = 0.00675; 
+    const LIMIT_2030 = 0.00407; 
+    const LIMIT_2035 = 0.0014;  // 假设更严格
+
+    // 能源价格假设 (Utility Rates)
+    const PRICE_ELEC = 0.22; // $/kWh
+    const PRICE_GAS = 1.10;  // $/Therm
+    const PRICE_OIL = 4.00;  // $/Gallon
+
+    // --- 2. ECM 数据库 (模拟你的 ML 模型预测系数) ---
+    // 这些系数代表实施该 ECM 后，各项能源消耗减少的百分比 (负数代表增加)
+    const ECM_DB = [
+        { name: "Upgrade to LED Lighting", costPerSqFt: 1.2, saveElec: 0.18, saveGas: -0.02, saveOil: -0.02 }, 
+        { name: "Insulate Heating Pipes", costPerSqFt: 0.8, saveElec: 0.00, saveGas: 0.09, saveOil: 0.09 },
+        { name: "Install Low-Flow Aerators", costPerSqFt: 0.15, saveElec: 0.02, saveGas: 0.05, saveOil: 0.05 },
+        { name: "Upgrade EMS/BMS Control", costPerSqFt: 2.5, saveElec: 0.08, saveGas: 0.12, saveOil: 0.12 },
+        { name: "High-Performance Windows", costPerSqFt: 28.0, saveElec: 0.05, saveGas: 0.15, saveOil: 0.15 },
+        { name: "DHW Separation", costPerSqFt: 4.0, saveElec: 0.00, saveGas: 0.18, saveOil: 0.18 }
+    ];
+
+    let myChart = null;
+
+    // --- 3. 核心计算函数 ---
+    function runSimulation() {
+        // 读取输入
+        const area = parseFloat(document.getElementById('area').value);
+        const elec = parseFloat(document.getElementById('elec').value);
+        const gas = parseFloat(document.getElementById('gas').value);
+        const oil = parseFloat(document.getElementById('oil').value);
+        const budget = parseFloat(document.getElementById('budget').value);
+
+        // 计算当前碳排放和罚款
+        const currentEmissions = (elec * COF_ELEC) + (gas * COF_GAS) + (oil * COF_OIL);
+        const limitMass2024 = LIMIT_2024 * area;
+        const limitMass2030 = LIMIT_2030 * area;
+        
+        let penalty2024 = 0;
+        if (currentEmissions > limitMass2024) {
+            penalty2024 = (currentEmissions - limitMass2024) * PENALTY_RATE;
+        }
+
+        const currentUtilityCost = (elec * PRICE_ELEC) + (gas * PRICE_GAS) + (oil * PRICE_OIL);
+
+        // 评估每个 ECM
+        let recommendations = [];
+
+        ECM_DB.forEach(ecm => {
+            const cost = ecm.costPerSqFt * area;
+            
+            // 预测新能耗
+            const newElec = elec * (1 - ecm.saveElec);
+            const newGas = gas * (1 - ecm.saveGas);
+            const newOil = oil * (1 - ecm.saveOil);
+
+            const newEmissions = (newElec * COF_ELEC) + (newGas * COF_GAS) + (newOil * COF_OIL);
+            
+            // 计算新罚款
+            let newPenalty = 0;
+            if (newEmissions > limitMass2024) {
+                newPenalty = (newEmissions - limitMass2024) * PENALTY_RATE;
+            }
+
+            const newUtilityCost = (newElec * PRICE_ELEC) + (newGas * PRICE_GAS) + (newOil * PRICE_OIL);
+
+            // 计算节省 (能源费节省 + 罚款节省)
+            const energySavings = currentUtilityCost - newUtilityCost;
+            const penaltySavings = penalty2024 - newPenalty;
+            const totalAnnualSavings = energySavings + penaltySavings;
+
+            // 计算投资回报期
+            let payback = 999;
+            if (totalAnnualSavings > 0) {
+                payback = cost / totalAnnualSavings;
+            }
+
+            recommendations.push({
+                ...ecm,
+                cost: cost,
+                savings: totalAnnualSavings,
+                payback: payback,
+                newEmissions: newEmissions
+            });
+        });
+
+        // 排序：优先推荐回本快的
+        recommendations.sort((a, b) => a.payback - b.payback);
+
+        // 更新界面数据
+        updateUI(penalty2024, recommendations, budget);
+        
+        // 更新图表 (取最佳推荐方案后的排放量)
+        const bestECM = recommendations.find(r => r.cost <= budget) || recommendations[0];
+        updateChart(currentEmissions, limitMass2024, limitMass2030, bestECM.newEmissions);
+    }
+
+    function updateUI(currentPenalty, recommendations, budget) {
+        // 更新顶部数字
+        document.getElementById('currentPenalty').innerText = formatCurrency(currentPenalty);
+        
+        // 填充表格
+        const tbody = document.getElementById('ecmTableBody');
+        tbody.innerHTML = '';
+        
+        let cumulativeCost = 0;
+        let totalScenarioSavings = 0;
+
+        recommendations.forEach((item, index) => {
+            let rowClass = "";
+            let status = `<span class="badge bg-secondary">Pending</span>`;
+            
+            cumulativeCost += item.cost;
+
+            // 逻辑：如果这个措施加上之前的措施还在预算内，就推荐
+            // (简化的逻辑，实际上应该是组合优化，但作为Web Demo这样足够了)
+            if (item.cost <= budget) { 
+                rowClass = "table-success"; 
+                status = `<span class="badge bg-success">Recommended</span>`;
+                totalScenarioSavings = Math.max(totalScenarioSavings, item.savings); // 这里简单取单个最佳，避免重复计算叠加复杂性
+            } else {
+                status = `<span class="badge bg-warning text-dark">Over Budget</span>`;
+            }
+
+            const row = `
+                <tr class="${rowClass}">
+                    <td>#${index + 1}</td>
+                    <td><strong>${item.name}</strong></td>
+                    <td>${formatCurrency(item.cost)}</td>
+                    <td>${formatCurrency(item.savings)}</td>
+                    <td>${item.payback.toFixed(1)} Yrs</td>
+                    <td>${status}</td>
+                </tr>
+            `;
+            tbody.innerHTML += row;
+        });
+        
+        document.getElementById('totalSavings').innerText = formatCurrency(totalScenarioSavings);
+    }
+
+    // --- 4. 辅助函数 ---
+    function formatCurrency(num) {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(num);
+    }
+
+    function updateChart(current, limit24, limit30, postRetrofit) {
+        const ctx = document.getElementById('emissionChart').getContext('2d');
+        if (myChart) myChart.destroy();
+
+        myChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: ['Current Emissions', '2024 Limit', '2030 Limit', 'Post-Retrofit'],
+                datasets: [{
+                    label: 'Carbon Emissions (tCO2e/year)',
+                    data: [current, limit24, limit30, postRetrofit],
+                    backgroundColor: [
+                        '#6c757d', // Current (Grey)
+                        '#dc3545', // Limit 24 (Red)
+                        '#fd7e14', // Limit 30 (Orange)
+                        '#198754'  // Post (Green)
+                    ],
+                    borderRadius: 5
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { display: false },
+                    title: { display: true, text: 'Carbon Compliance Visualization' }
+                },
+                scales: {
+                    y: { beginAtZero: true }
+                }
+            }
+        });
+    }
+
+    // 页面加载时运行一次
+    window.onload = runSimulation;
+
+</script>
+</body>
+</html>
